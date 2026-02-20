@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${FASTAPI_PORT:-8000}:8000"
+    networks:
+      - ps5net
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ps5bot
+      POSTGRES_PASSWORD: ps5bot
+      POSTGRES_DB: ps5bot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ps5bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ps5net
+
+volumes:
+  pgdata:
+
+networks:
+  ps5net:
