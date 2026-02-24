@@ -1,8 +1,6 @@
 import uuid
 import logging
 
-from yookassa import Configuration, Payment
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -11,14 +9,40 @@ from app.models.transaction import Transaction, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
-Configuration.account_id = settings.YOOKASSA_SHOP_ID
-Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+
+def _configure_yookassa():
+    """Lazy-configure YooKassa SDK (only when not in mock mode)."""
+    from yookassa import Configuration
+    Configuration.account_id = settings.YOOKASSA_SHOP_ID
+    Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
 
 async def create_payment(db: AsyncSession, session: Session) -> Transaction:
-    """Create a YooKassa payment and return Transaction with confirmation_url."""
+    """Create a payment. In mock mode — instant PAID without YooKassa."""
     idempotency_key = str(uuid.uuid4())
-    amount_rub = session.price / 100  # kopecks -> rubles
+    amount_rub = session.price / 100
+
+    if settings.PAYMENT_MOCK:
+        # --- MOCK: no real payment, instant success ---
+        txn = Transaction(
+            session_id=session.id,
+            user_id=session.user_id,
+            amount=session.price,
+            yookassa_payment_id=f"mock_{idempotency_key}",
+            status=PaymentStatus.PAID,
+            confirmation_url=None,
+        )
+        session.status = SessionStatus.CONFIRMED
+        db.add(txn)
+        await db.commit()
+        await db.refresh(txn)
+        await db.refresh(session)
+        logger.info("MOCK payment created for session %s", session.id)
+        return txn
+
+    # --- REAL YooKassa ---
+    _configure_yookassa()
+    from yookassa import Payment
 
     payment = Payment.create(
         {

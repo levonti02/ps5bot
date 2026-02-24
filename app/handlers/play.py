@@ -7,14 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.console import Console, ConsoleStatus
+from app.models.session import Session, SessionStatus, SessionType
 from app.models.user import User
+from app.models.transaction import PaymentStatus
 from app.services.booking import create_instant_session, get_next_free_time
 from app.services.payment import create_payment
+from app.services import shelly
 from app.keyboards.main import (
     tariff_kb,
     confirm_order_kb,
     payment_kb,
     session_active_kb,
+    booking_confirmed_kb,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
 )
 
 router = Router()
@@ -40,7 +46,6 @@ async def play_now(callback: CallbackQuery, db: AsyncSession):
     else:
         free_at = await get_next_free_time(db, console.id)
         free_text = f"Освободится в {free_at.strftime('%H:%M')}" if free_at else "Время неизвестно"
-        from app.keyboards.main import InlineKeyboardMarkup, InlineKeyboardButton
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📅 Забронировать на позже", callback_data=f"book:{console_code}")],
             [InlineKeyboardButton(text="◀ Назад", callback_data=f"back_welcome:{console_code}")],
@@ -95,13 +100,19 @@ async def select_tariff_instant(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_session(callback: CallbackQuery, db: AsyncSession):
     session_id = int(callback.data.split(":")[1])
-    from app.models.session import Session
     session = await db.get(Session, session_id)
     if not session:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
 
     txn = await create_payment(db, session)
+
+    # --- MOCK MODE: payment already PAID, activate immediately ---
+    if settings.PAYMENT_MOCK and txn.status == PaymentStatus.PAID:
+        await _handle_paid_session(callback, db, session)
+        return
+
+    # --- REAL MODE: show payment link ---
     text = (
         "💳 Оплата через СБП\n"
         "Нажмите кнопку ниже и завершите оплату.\n"
@@ -111,10 +122,50 @@ async def pay_session(callback: CallbackQuery, db: AsyncSession):
     await callback.answer()
 
 
+async def _handle_paid_session(callback: CallbackQuery, db: AsyncSession, session: Session):
+    """Common logic after payment confirmed (mock or real)."""
+    console = await db.get(Console, session.console_id)
+
+    if session.session_type == SessionType.INSTANT:
+        # Activate immediately
+        session.status = SessionStatus.ACTIVE
+        if console:
+            ok = await shelly.turn_on(console.shelly_ip)
+            if ok:
+                console.status = ConsoleStatus.BUSY
+            else:
+                for admin_id in settings.ADMIN_IDS:
+                    try:
+                        await callback.bot.send_message(
+                            admin_id,
+                            f"⚠️ Не удалось включить розетку {console.name} ({console.shelly_ip})",
+                        )
+                    except Exception:
+                        pass
+        await db.commit()
+        await callback.message.edit_text(
+            f"✅ Оплата получена\n🎮 Игра начинается!\n"
+            f"⏱ Окончание: {session.slot_end.strftime('%H:%M')}\n\n"
+            f"Приятной игры 🎮",
+            reply_markup=session_active_kb(),
+        )
+    else:
+        # Booking — confirmed, user activates later
+        await db.commit()
+        await callback.message.edit_text(
+            f"✅ Бронь подтверждена\n"
+            f"🎮 {console.name}\n"
+            f"📅 {session.slot_start.strftime('%d.%m.%Y')}\n"
+            f"⏰ {session.slot_start.strftime('%H:%M')}–{session.slot_end.strftime('%H:%M')}\n\n"
+            f"Мы напомним вам перед началом 🔔",
+            reply_markup=booking_confirmed_kb(session.id, console.code),
+        )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("cancel_session:"))
 async def cancel_session(callback: CallbackQuery, db: AsyncSession):
     session_id = int(callback.data.split(":")[1])
-    from app.models.session import Session, SessionStatus
     session = await db.get(Session, session_id)
     if session and session.status in (SessionStatus.HOLD, SessionStatus.CONFIRMED):
         session.status = SessionStatus.CANCELLED

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     SHELLY_RETRY_COUNT: int = 3
     SHELLY_TIMEOUT_SECONDS: int = 5
 
+    # Mock payment (skip YooKassa, instant confirmation)
+    PAYMENT_MOCK: bool = True
+
     # Timezone
     TIMEZONE: str = "Europe/Moscow"
 
