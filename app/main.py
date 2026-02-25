@@ -8,6 +8,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from sqlalchemy import text
 
+# Fix aiogram bug: DefaultBotProperties.__getitem__ may not handle 'link_preview' key
+_orig_getitem = getattr(DefaultBotProperties, "__getitem__", None)
+if _orig_getitem is not None:
+    DefaultBotProperties.__getitem__ = lambda self, item: getattr(self, item, None)
+
 from app.config import settings
 from app.database import engine
 from app.models import Base
