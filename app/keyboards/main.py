@@ -21,6 +21,25 @@ def city_select_kb(cities: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def location_select_kb(locations: list[tuple[int, str]], city_id: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=addr, callback_data=f"location:{lid}")]
+        for lid, addr in locations
+    ]
+    rows.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_cities")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def console_select_kb(consoles: list[tuple[str, str, str]], location_id: int) -> InlineKeyboardMarkup:
+    """consoles: list of (code, name, status_label)"""
+    rows = [
+        [InlineKeyboardButton(text=f"{name} [{status}]", callback_data=f"console:{code}")]
+        for code, name, status in consoles
+    ]
+    rows.append([InlineKeyboardButton(text="◀ Назад", callback_data=f"back_location:{location_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def tariff_kb(console_code: str, prefix: str = "tariff") -> InlineKeyboardMarkup:
     tariffs = settings.tariffs
     labels = {30: "🕐 30 минут", 60: "🕐 60 минут", 90: "🕐 90 минут", 120: "🕐 120 минут"}
