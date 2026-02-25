@@ -5,13 +5,22 @@ import uvicorn
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.base import BaseSession
 from aiogram.enums import ParseMode
 from sqlalchemy import text
 
-# Fix aiogram bug: DefaultBotProperties.__getitem__ may not handle 'link_preview' key
-_orig_getitem = getattr(DefaultBotProperties, "__getitem__", None)
-if _orig_getitem is not None:
-    DefaultBotProperties.__getitem__ = lambda self, item: getattr(self, item, None)
+# Fix aiogram bug: prepare_value raises KeyError for 'link_preview' sentinel
+_orig_prepare_value = BaseSession.prepare_value
+
+
+def _safe_prepare_value(self, value, bot=None, files=None):
+    try:
+        return _orig_prepare_value(self, value, bot=bot, files=files)
+    except KeyError:
+        return None
+
+
+BaseSession.prepare_value = _safe_prepare_value
 
 from app.config import settings
 from app.database import engine
