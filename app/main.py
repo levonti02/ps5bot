@@ -13,9 +13,9 @@ from sqlalchemy import text
 _orig_prepare_value = BaseSession.prepare_value
 
 
-def _safe_prepare_value(self, value, bot=None, files=None):
+def _safe_prepare_value(self, value, *args, **kwargs):
     try:
-        return _orig_prepare_value(self, value, bot=bot, files=files)
+        return _orig_prepare_value(self, value, *args, **kwargs)
     except KeyError:
         return None
 
